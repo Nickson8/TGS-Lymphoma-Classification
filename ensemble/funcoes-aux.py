@@ -2,28 +2,50 @@
 Funcao que auxiliam no calculo das metricas
 """
 
-def calculate_metrics(data):
+def calculate_metrics(data, n_resamples=1000):
     """
-    Calculates the mean, standard deviation, and 95% confidence interval for a list of 5 numbers.
+    Calcula a média, desvio padrão (amostral) e o 
+    IC de 95% usando o método percentile bootstrap.
     """
 
-    # Convert list of Tensors to a list of floats
+    # 1. Converte Tensors para floats, se necessário (do seu código original)
     data2 = data[:]
     try:
         data = [item.item() for item in data]
-    except:
+    except Exception:
         data = data2[:]
     
 
+    # 2. Calcula a média e o desvio padrão dos 5 folds originais
+    # A média e o DP reportados são os das métricas observadas.
     mean = statistics.mean(data)
-    sd = statistics.stdev(data)
-    n = len(data)
-    df = n - 1
-    t_stat = stats.t.ppf(0.975, df)
-    margin_of_error = t_stat * (sd / math.sqrt(n))
-    ci_lower = mean - margin_of_error
-    ci_upper = mean + margin_of_error
+    sd = statistics.stdev(data) # Desvio padrão amostral (ddof=1)
     
+    # --- Início do Bootstrap ---
+    
+    # 3. Gera as médias das reamostragens
+    bootstrapped_means = []
+    n_size = len(data) # Tamanho da amostra original (5)
+
+    for _ in range(n_resamples):
+        # Sorteia 'n_size' amostras COM REPOSIÇÃO
+        resample = np.random.choice(data, size=n_size, replace=True)
+        
+        # Calcula a média da reamostra
+        boot_mean = np.mean(resample)
+        bootstrapped_means.append(boot_mean)
+
+    # 4. Calcula o Intervalo de Confiança (Percentil)
+    # Para um IC de 95%, queremos os percentis 2.5 e 97.5
+    
+    alpha = 0.05 # Para 95% de confiança
+    
+    # np.percentile calcula o valor abaixo do qual 'q'% dos dados caem
+    ci_lower = np.percentile(bootstrapped_means, (alpha / 2.0) * 100)
+    ci_upper = np.percentile(bootstrapped_means, (1 - alpha / 2.0) * 100)
+    
+    # --- Fim do Bootstrap ---
+
     return {
         "mean": mean,
         "sd": sd,
@@ -38,15 +60,6 @@ def format_metric(metric_data):
     # Usando uma quebra de linha para melhor legibilidade na célula da tabela do Word
     return f"{mean:.2f} ± {sd:.3f}\n[{ci_lower:.2f}, {ci_upper:.2f}]"
 
-# --- Função de exemplo (substitua pela sua implementação real) ---
-def calculate_metrics(data_list):
-    """Calcula a média, desvio padrão e IC de 95% para uma lista de dados."""
-    mean = np.mean(data_list)
-    sd = np.std(data_list)
-    # Cálculo simples de IC, ajuste conforme necessário
-    ci_lower = mean - 1.96 * (sd / np.sqrt(len(data_list)))
-    ci_upper = mean + 1.96 * (sd / np.sqrt(len(data_list)))
-    return {'mean': mean, 'sd': sd, '95%_ci': (ci_lower, ci_upper)}
 # ----------------------------------------------------------------
 
 def create_results_document(model_name, metrics, filename="Resultados_Ensemble.docx"):

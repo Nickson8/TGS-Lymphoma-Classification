@@ -7,9 +7,9 @@ dado o dataset
 @param modelo -> modelo baseado em pytorch
 """
 class Total_Writer_Ensemble:
-    def __init__(self, modelo, batch_size, lr):
+    def __init__(self, batch_size, lr):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.modelo = modelo
+        self.modelo = None
         self.batch_size = batch_size
         self.lr = lr
 
@@ -39,6 +39,9 @@ class Total_Writer_Ensemble:
             train_idxs = train_idxs.tolist()
             test_idxs = test_idxs.tolist()
             self.test_idxs = test_idxs
+
+            #Reiniciando o Modelo
+            self.modelo = MetaLearner()
 
             
             print(f"\n\n\n\n\n\n\n\n\n\n\n\n***\n***\n{idk+1}° Fold\n***\n***\n")
@@ -104,6 +107,8 @@ class Total_Writer_Ensemble:
 
         #Training loop
         for epoch in range(epochs):
+
+            self.modelo.train()
             
             #Treinando com os batchs
             train_loss = 0.0
@@ -129,6 +134,8 @@ class Total_Writer_Ensemble:
 
             
             #Validaçao
+            self.modelo.eval()
+            
             val_loss = 0.0
             correct = 0
             total = 0
@@ -153,15 +160,16 @@ class Total_Writer_Ensemble:
                 print(f'---Epoch {epoch+1}\nLoss do Treino: {train_loss/len(train_loader):.4f}\n' +
                   f'Loss da Validaçao: {val_loss/len(val_loader):.4f}, Accuracy: {100*correct/total:.2f}%, lr: {optimizer.param_groups[0]["lr"]:.9f}')
 
-            scheduler.step(val_loss)
+            avg_val_loss = val_loss / len(val_loader)
+            scheduler.step(avg_val_loss)
             
-            val_losses.append(val_loss/len(val_loader))
+            val_losses.append(avg_val_loss)
 
             if(val_losses[-1] > val_losses[-2]):
                 cont += 1
             else:
                 cont = 0
-            if(cont >= 8):
+            if(cont >= 10):
                 print("####### Validação estagnada, parando o treinamento #######")
 
 
@@ -236,7 +244,7 @@ class Total_Writer_Ensemble:
 
 
 
-    def gera_relatorios(self, X, y):
+    def gera_relatorios(self, X, X_nomes, y):
         ensemble_metricas = {
             'TGS': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'Linfoma': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
@@ -256,9 +264,9 @@ class Total_Writer_Ensemble:
 
             self.teste(rede, ensemble_metricas, test_loader)
 
-            self.gera_heatmaps(rede, X, test_idxs, j)
+            self.gera_heatmaps(rede, X, X_nomes, test_idxs, j)
 
-            self.gera_matrizes_de_conf(rede ,test_loader, j)
+            #self.gera_matrizes_de_conf(rede ,test_loader, j)
         
 
         create_results_document("Ensemble Model", ensemble_metricas)
@@ -278,6 +286,8 @@ class Total_Writer_Ensemble:
         all_labels = []
         
         s = nn.Sigmoid()
+
+        rede.eval()
         
         with torch.no_grad():
             for inputs, labels in test_loader:
@@ -335,7 +345,7 @@ class Total_Writer_Ensemble:
 
 
 
-    def gera_heatmaps(self, ensemble, X, test_idxs, fold):
+    def gera_heatmaps(self, ensemble, X, X_nomes, test_idxs, fold):
 
         swin = ensemble.feature_extractors[0]
         vit = ensemble.feature_extractors[1]
@@ -351,6 +361,7 @@ class Total_Writer_Ensemble:
         resnet_target_layers = [resnet.module.layer4[-1]]
 
         imagens_brutas = [X[i] for i in test_idxs]
+        nomes_imgs = [X_nomes[i] for i in test_idxs]
         images_heat = []
         cont = 1
         
@@ -396,7 +407,7 @@ class Total_Writer_Ensemble:
                 image.save(image_buffer, format='PNG')
                 
                 # Write the image buffer's content to the zip file
-                file_name = f"heatmap_{i+1}.png"
+                file_name = f"heatmap_{nomes_imgs[i]}.png"
                 zip_file.writestr(file_name, image_buffer.getvalue())
         
         # --- 3. Save the Zip File to Disk ---
@@ -442,4 +453,4 @@ class Total_Writer_Ensemble:
         plt.title('Ensemble')
         plt.ylabel('Classe Verdadeira')
         plt.xlabel('Classe Predita')
-        plt.savefig(f'/working/conf_matriz/matriz_fold_{fold}.tiff', dpi=600)
+        plt.savefig(f'working/conf_matriz/matriz_fold_{fold}.tiff', dpi=600)

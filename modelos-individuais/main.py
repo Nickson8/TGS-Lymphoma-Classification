@@ -1,7 +1,7 @@
 def main():
 
-    TGS_imgs = load_images_from_folder("tgs-imgs")
-    Lymphomas_imgs = load_images_from_folder("linfoma-imgs")
+    TGS_imgs = load_images_from_folder("/tgs-imgs")
+    Lymphomas_imgs = load_images_from_folder("/linfoma-imgs")
 
     print("Terminou de carregar as imagens")
 
@@ -11,8 +11,8 @@ def main():
     X = TGS_imgs + Lymphomas_imgs
     y = [0]*len(TGS_imgs) + [1]*len(Lymphomas_imgs)
 
-    total = Total_Writer_Ind(Medic_Model("timm/resnet50.a1_in1k"),
-                             "Resnet", batch_size=batch_size, lr=1e-3)
+    total = Total_Writer_Ind(Medic_Model("timm/vit_base_patch32_clip_448.laion2b_ft_in12k_in1k"),
+                             "ViT", batch_size=batch_size, lr=1e-3)
     #Treina, printa os logs e salva os folds
     total.treina(X, y, epochs)
     total.gera_relatorios(X, y)

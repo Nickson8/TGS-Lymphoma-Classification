@@ -33,7 +33,7 @@ class Model_Dataset(Dataset):
             transforms.Lambda(lambda img: img.convert("RGB")),
             transforms.Resize((input_size[0], input_size[1])),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
                 

@@ -8,12 +8,12 @@ dado o dataset
 class Total_Writer_Ind:
     def __init__(self, modelo, nome, batch_size, lr):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.modelo = modelo
         self.batch_size = batch_size
+        self.modelo = None
         self.lr = lr
-        self.H = self.modelo.H
-        self.W = self.modelo.W
-        self.nome = self.modelo.name
+        self.H = modelo.H
+        self.W = modelo.W
+        self.nome = modelo.name
         self.nome_bonito = nome
 
 
@@ -44,6 +44,9 @@ class Total_Writer_Ind:
             self.test_idxs = test_idxs
             
             print(f"\n\n\n\n\n\n\n\n\n\n\n\n***\n***\n{idk+1}° Fold\n***\n***\n")
+            #Reinicializa o modelo
+            self.modelo = Medic_Model(self.nome)
+            
             #Treino é separado entre treino e val
             random.shuffle(train_idxs)
             train_idxs_2 = train_idxs[: int(0.9*len(train_idxs))]
@@ -72,26 +75,48 @@ class Total_Writer_Ind:
 
 
     def get_optimizer(self):
-        if "vit" in self.nome.lower():
-            # Case 1: ViT model → all parameters trainable
-            optimizer = AdamW(self.modelo.model.parameters(), lr=2e-6)
-
-        else:
-            # Case 2: Non-ViT model → freeze everything
-            for name, param in self.modelo.model.named_parameters():
-                param.requires_grad = False
-
-            if("densenet" in self.nome.lower()):
-                self.modelo.model.module.classifier = nn.Linear(self.modelo.model.module.classifier.in_features, 1).to(self.device)
-            elif("resnet" in self.nome.lower()):
-                self.modelo.model.module.fc = nn.Linear(self.modelo.model.module.fc.in_features, 1).to(self.device)
-            elif("vit" in self.nome.lower()):
-                self.modelo.model.module.head = nn.Linear(self.modelo.model.module.head.in_features, 1).to(self.device)
+        
+        # 1. Congelar TODOS os parâmetros do modelo
+        for param in self.modelo.model.parameters():
+            param.requires_grad = False
             
-            optimizer = AdamW(
-                filter(lambda p: p.requires_grad, self.modelo.model.parameters()), 
-                lr=self.lr
-            )
+        # 2. Descongelar APENAS a camada final
+        #    (O nome da camada muda: 'fc' para ResNet, 'head' para ViT, 'classifier' para DenseNet)
+        
+        final_layer = None
+        
+        # Tenta acessar a camada final, lidando com o nn.DataParallel (que adiciona 'module.')
+        try:
+            # Caso 1: nn.DataParallel está ativo
+            if "resnet" in self.nome.lower():
+                final_layer = self.modelo.model.module.fc
+            elif "vit" in self.nome.lower() or "swin" in self.nome.lower():
+                final_layer = self.modelo.model.module.head
+            elif "densenet" in self.nome.lower():
+                final_layer = self.modelo.model.module.classifier
+        except AttributeError:
+            # Caso 2: Sem nn.DataParallel
+            if "resnet" in self.nome.lower():
+                final_layer = self.modelo.model.fc
+            elif "vit" in self.nome.lower() or "swin" in self.nome.lower():
+                final_layer = self.modelo.model.head
+            elif "densenet" in self.nome.lower():
+                final_layer = self.modelo.model.classifier
+
+        if final_layer is None:
+            raise Exception(f"Arquitetura de modelo desconhecida: {self.nome}. Não foi possível encontrar a camada final para descongelar.")
+
+        # Descongela os parâmetros da camada final encontrada
+        for param in final_layer.parameters():
+            param.requires_grad = True
+
+        
+        # 3. O otimizador vai treinar apenas os parâmetros descongelados (a camada final)
+        #    Usando o LR que você definiu na classe (1e-3 para ResNet)
+        optimizer = AdamW(
+            filter(lambda p: p.requires_grad, self.modelo.model.parameters()), 
+            lr=self.lr, weight_decay=0.05
+        )
 
         return optimizer
 
@@ -121,6 +146,7 @@ class Total_Writer_Ind:
         for epoch in range(epochs):
             
             #Treinando com os batchs
+            self.modelo.model.train()
             train_loss = 0.0
             for inputs, labels in train_loader:
                 # Move data to GPU
@@ -144,6 +170,8 @@ class Total_Writer_Ind:
 
             
             #Validaçao
+            self.modelo.model.eval()
+            
             val_loss = 0.0
             correct = 0
             total = 0
@@ -176,7 +204,7 @@ class Total_Writer_Ind:
                 cont += 1
             else:
                 cont = 0
-            if(cont >= 8):
+            if(cont >= 10):
                 print("####### Validação estagnada, parando o treinamento #######")
                 break
     
@@ -225,7 +253,7 @@ class Total_Writer_Ind:
             'AUPRC': []
         }
 
-        modelos = [x for x in os.listdir("working") if "fold" in x]
+        modelos = [x for x in os.listdir("/working") if "fold" in x]
 
         for j, modelo in enumerate(modelos):
             rede, test_idxs = load_model(self.nome, modelo)
@@ -246,6 +274,8 @@ class Total_Writer_Ind:
 
 
     def teste(self, rede, metricas_modelo, test_loader):
+
+        rede.eval()
         # Fazendo predicoes
         all_preds = []
         all_probs = []
@@ -340,4 +370,4 @@ class Total_Writer_Ind:
         plt.title(self.nome_bonito)
         plt.ylabel('Classe Verdadeira')
         plt.xlabel('Classe Predita')
-        plt.savefig(f'working/conf_matriz/matriz_fold_{fold+1}.tiff', dpi=600)
+        plt.savefig(f'/working/conf_matriz/matriz_fold_{fold+1}.tiff', dpi=600)

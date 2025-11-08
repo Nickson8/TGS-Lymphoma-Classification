@@ -9,6 +9,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def load_images_from_folder(folder):
     images = []
+    nomes = []
     for filename in os.listdir(folder):
         img_path = os.path.join(folder, filename)
         try:
@@ -16,10 +17,11 @@ def load_images_from_folder(folder):
 
             if img is not None:
                 images.append(img)
+                nomes.append(filename.split('/')[-1].split('.')[0])
         except Exception as e:
             print(f"Error loading {img_path}: {e}")
     
-    return images
+    return images, nomes
 
 
 class Modelo_Ensemble_Dataset(Dataset):
