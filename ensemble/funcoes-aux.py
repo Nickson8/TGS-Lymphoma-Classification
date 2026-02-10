@@ -108,10 +108,10 @@ def create_results_document(model_name, metrics, filename="Resultados_Ensemble.d
     # --- Combina os dados para a única linha de dados ---
     model_col_text = f"{model_name}\nTGS\nLinfoma"
     accuracy_col_text = f"{format_metric(calculate_metrics(metrics['accuracy']))}\n-\n-"
-    sensitivity_col_text = f"-\n{format_metric(calculate_metrics(metrics['TGS']['recall']))}\n{format_metric(calculate_metrics(metrics['Linfoma']['recall']))}"
-    specificity_col_text = f"-\n{format_metric(calculate_metrics(metrics['TGS']['specificity']))}\n{format_metric(calculate_metrics(metrics['Linfoma']['specificity']))}"
-    precision_col_text = f"-\n{format_metric(calculate_metrics(metrics['TGS']['precision']))}\n{format_metric(calculate_metrics(metrics['Linfoma']['precision']))}"
-    f1_score_col_text = f"-\n{format_metric(calculate_metrics(metrics['TGS']['f1-score']))}\n{format_metric(calculate_metrics(metrics['Linfoma']['f1-score']))}"
+    sensitivity_col_text = f"{format_metric(calculate_metrics(metrics['Geral']['recall']))}\n\n{format_metric(calculate_metrics(metrics['TGS']['recall']))}\n\n{format_metric(calculate_metrics(metrics['Linfoma']['recall']))}"
+    specificity_col_text = f"{format_metric(calculate_metrics(metrics['Geral']['specificity']))}\n\n{format_metric(calculate_metrics(metrics['TGS']['specificity']))}\n\n{format_metric(calculate_metrics(metrics['Linfoma']['specificity']))}"
+    precision_col_text = f"{format_metric(calculate_metrics(metrics['Geral']['precision']))}\n\n{format_metric(calculate_metrics(metrics['TGS']['precision']))}\n\n{format_metric(calculate_metrics(metrics['Linfoma']['precision']))}"
+    f1_score_col_text = f"{format_metric(calculate_metrics(metrics['Geral']['f1-score']))}\n\n{format_metric(calculate_metrics(metrics['TGS']['f1-score']))}\n\n{format_metric(calculate_metrics(metrics['Linfoma']['f1-score']))}"
     auc_roc_col_text = f"{format_metric(calculate_metrics(metrics['AUC']))}\n-\n-"
     auprc_col_text = f"{format_metric(calculate_metrics(metrics['AUPRC']))}\n-\n-"
 

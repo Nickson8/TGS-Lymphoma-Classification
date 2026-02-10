@@ -21,16 +21,12 @@ class MetaLearner(nn.Module):
         
         self.feature_extractors = [x.to(self.device) for x in self.feature_extractors]
 
-        #Classification Head
         self.layers = nn.Sequential(
-            # First block
-            nn.Linear(4864, 512),
-            nn.BatchNorm1d(512),
-            nn.GELU(), # A smooth, modern activation function
-            nn.Dropout(0.5),
-            
-            # Output layer
-            nn.Linear(512, 1)
+            nn.Linear(4864, 256),  # Reduced from 512
+            nn.BatchNorm1d(256),
+            nn.GELU(),
+            nn.Dropout(0.7),  # Increased dropout
+            nn.Linear(256, 1)
         ).to(self.device)
 
 
@@ -40,8 +36,8 @@ class MetaLearner(nn.Module):
 
     def forward(self, x):
         #Outputs dos feature extractors
-        output_vit = self.feature_extractors[1](self.transforms[1](x))
         with torch.no_grad():
+            output_vit = self.feature_extractors[1](self.transforms[1](x))
             output_swin = self.feature_extractors[0](self.transforms[0](x))
             output_desenet = self.feature_extractors[2](self.transforms[2](x))
             output_resnet = self.feature_extractors[3](self.transforms[3](x))

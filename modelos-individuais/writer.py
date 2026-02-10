@@ -53,11 +53,11 @@ class Total_Writer_Ind:
             val_idxs = train_idxs[int(0.9*len(train_idxs)) :]
 
 
-            train_loader = DataLoader(Model_Dataset([X[i] for i in train_idxs_2], [y[i] for i in train_idxs_2], is_training=True, input_size=(self.H, self.W)),
+            train_loader = DataLoader(Model_Dataset([X[i] for i in train_idxs_2], [y[i] for i in train_idxs_2], is_training=True),
                                            batch_size=self.batch_size, shuffle=True,
                                            pin_memory=True, num_workers=2)
             
-            val_loader = DataLoader(Model_Dataset([X[i] for i in val_idxs], [y[i] for i in val_idxs], input_size=(self.H, self.W)),
+            val_loader = DataLoader(Model_Dataset([X[i] for i in val_idxs], [y[i] for i in val_idxs]),
                                            batch_size=self.batch_size, shuffle=False,
                                            pin_memory=True, num_workers=2)
 
@@ -246,6 +246,7 @@ class Total_Writer_Ind:
 
     def gera_relatorios(self, X, y):
         metricas_modelo = {
+            'Geral': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'TGS': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'Linfoma': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'accuracy': [],
@@ -253,12 +254,12 @@ class Total_Writer_Ind:
             'AUPRC': []
         }
 
-        modelos = [x for x in os.listdir("/working") if "fold" in x]
+        modelos = [x for x in os.listdir("/kaggle/working") if "fold" in x]
 
         for j, modelo in enumerate(modelos):
             rede, test_idxs = load_model(self.nome, modelo)
 
-            test_loader = DataLoader(Model_Dataset([X[i] for i in test_idxs], [y[i] for i in test_idxs], input_size=(self.H, self.W)),
+            test_loader = DataLoader(Model_Dataset([X[i] for i in test_idxs], [y[i] for i in test_idxs]),
                                        batch_size=self.batch_size, shuffle=False,
                                        pin_memory=True, num_workers=2)
 
@@ -325,6 +326,14 @@ class Total_Writer_Ind:
         report_modelo['TGS']['specificity'] = report_modelo['Linfoma']['recall']
         report_modelo['Linfoma']['specificity'] = report_modelo['TGS']['recall']
 
+        report_modelo['Geral'] = {
+            'precision': (report_modelo['TGS']['precision']+report_modelo['Linfoma']['precision'])/2,
+            'recall': (report_modelo['TGS']['recall']+report_modelo['Linfoma']['recall'])/2,
+            'specificity': (report_modelo['TGS']['specificity']+report_modelo['Linfoma']['specificity'])/2,
+            'f1-score': (report_modelo['TGS']['f1-score']+report_modelo['Linfoma']['f1-score'])/2,
+            'support': (report_modelo['TGS']['support']+report_modelo['Linfoma']['support']),
+        }
+
         #-----Adicionando as metricas do fold atual-----
         for key in metricas_modelo.keys():
             if key in report_modelo:
@@ -370,4 +379,4 @@ class Total_Writer_Ind:
         plt.title(self.nome_bonito)
         plt.ylabel('Classe Verdadeira')
         plt.xlabel('Classe Predita')
-        plt.savefig(f'/working/conf_matriz/matriz_fold_{fold+1}.tiff', dpi=600)
+        plt.savefig(f'/kaggle/working/conf_matriz/matriz_fold_{fold+1}.tiff', dpi=600)

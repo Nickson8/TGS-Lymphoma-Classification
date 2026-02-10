@@ -34,7 +34,7 @@ class Total_Writer_Ensemble:
         """
         kf = StratifiedKFold(n_splits=5, shuffle=True)
 
-
+        
         for idk, (train_idxs, test_idxs) in enumerate(kf.split(X, y)):
             train_idxs = train_idxs.tolist()
             test_idxs = test_idxs.tolist()
@@ -57,7 +57,7 @@ class Total_Writer_Ensemble:
             
             val_loader = DataLoader(Modelo_Ensemble_Dataset([X[i] for i in val_idxs], [y[i] for i in val_idxs]),
                                            batch_size=self.batch_size, shuffle=False,
-                                           pin_memory=True, num_workers=2)
+                                           num_workers=0)
 
 
             self.fit(epochs=epochs, lr=self.lr,
@@ -82,12 +82,9 @@ class Total_Writer_Ensemble:
         # --- 3. Create the parameter groups for the optimizer ---
         param_groups = [
             # Group 1: The ensemble head with a high learning rate
-            {'params': self.modelo.layers.parameters(), 'lr': lr},
-            
-            # Group 2: The ViT backbone with a very low learning rate
-            {'params': self.modelo.feature_extractors[1].parameters(), 'lr': 2e-6}
+            {'params': self.modelo.layers.parameters(), 'lr': lr}
         ]
-        optimizer = AdamW(param_groups, weight_decay=1e-4)
+        optimizer = AdamW(param_groups, weight_decay=0.05)
 
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
@@ -109,6 +106,8 @@ class Total_Writer_Ensemble:
         for epoch in range(epochs):
 
             self.modelo.train()
+            for extractor in self.modelo.feature_extractors:
+                extractor.train()
             
             #Treinando com os batchs
             train_loss = 0.0
@@ -135,6 +134,8 @@ class Total_Writer_Ensemble:
             
             #Validaçao
             self.modelo.eval()
+            for extractor in self.modelo.feature_extractors:
+                extractor.eval()
             
             val_loss = 0.0
             correct = 0
@@ -165,12 +166,13 @@ class Total_Writer_Ensemble:
             
             val_losses.append(avg_val_loss)
 
-            if(val_losses[-1] > val_losses[-2]):
+            if(avg_val_loss > min(val_losses)):
                 cont += 1
             else:
                 cont = 0
-            if(cont >= 10):
+            if(cont >= 20):
                 print("####### Validação estagnada, parando o treinamento #######")
+                break
 
 
 
@@ -246,6 +248,7 @@ class Total_Writer_Ensemble:
 
     def gera_relatorios(self, X, X_nomes, y):
         ensemble_metricas = {
+            'Geral': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'TGS': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'Linfoma': {'precision': [], 'recall': [], 'specificity': [], 'f1-score': [], 'support': []},
             'accuracy': [],
@@ -253,20 +256,20 @@ class Total_Writer_Ensemble:
             'AUPRC': []
         }
 
-        modelos = [x for x in os.listdir("working") if "fold" in x]
+        modelos = [x for x in os.listdir("/kaggle/working") if "fold" in x]
 
         for j, modelo in enumerate(modelos):
             rede, test_idxs = MetaLearner.load_ensemble(modelo)
 
             test_loader = DataLoader(Modelo_Ensemble_Dataset([X[i] for i in test_idxs], [y[i] for i in test_idxs]),
                                        batch_size=self.batch_size, shuffle=False,
-                                       pin_memory=True, num_workers=2)
+                                       num_workers=0)
 
             self.teste(rede, ensemble_metricas, test_loader)
 
             self.gera_heatmaps(rede, X, X_nomes, test_idxs, j)
 
-            #self.gera_matrizes_de_conf(rede ,test_loader, j)
+            self.gera_matrizes_de_conf(rede ,test_loader, j)
         
 
         create_results_document("Ensemble Model", ensemble_metricas)
@@ -288,6 +291,8 @@ class Total_Writer_Ensemble:
         s = nn.Sigmoid()
 
         rede.eval()
+        for extractor in rede.feature_extractors:
+            extractor.eval()
         
         with torch.no_grad():
             for inputs, labels in test_loader:
@@ -311,6 +316,12 @@ class Total_Writer_Ensemble:
             target_names=["TGS", "Linfoma"],
             output_dict=True
         )
+
+        print("\nLabels: ", end='')
+        print(all_labels)
+        print("\nPreds: ", end='')
+        print(all_preds)
+        print()
         
         auc = binary_auroc(torch.tensor(all_probs), torch.tensor(all_labels))
         auprc = binary_auprc(torch.tensor(all_probs), torch.tensor(all_labels))
@@ -331,6 +342,14 @@ class Total_Writer_Ensemble:
         report_ensemble['TGS']['specificity'] = report_ensemble['Linfoma']['recall']
         report_ensemble['Linfoma']['specificity'] = report_ensemble['TGS']['recall']
 
+        report_ensemble['Geral'] = {
+            'precision': (report_ensemble['TGS']['precision']+report_ensemble['Linfoma']['precision'])/2,
+            'recall': (report_ensemble['TGS']['recall']+report_ensemble['Linfoma']['recall'])/2,
+            'specificity': (report_ensemble['TGS']['specificity']+report_ensemble['Linfoma']['specificity'])/2,
+            'f1-score': (report_ensemble['TGS']['f1-score']+report_ensemble['Linfoma']['f1-score'])/2,
+            'support': (report_ensemble['TGS']['support']+report_ensemble['Linfoma']['support']),
+        }
+
         #-----Adicionando as metricas do fold atual-----
         for key in ensemble_metricas.keys():
             if key in report_ensemble:
@@ -346,76 +365,146 @@ class Total_Writer_Ensemble:
 
 
     def gera_heatmaps(self, ensemble, X, X_nomes, test_idxs, fold):
-
+        # Set all models to eval mode
+        ensemble.eval()
+        for extractor in ensemble.feature_extractors:
+            ensemble.eval()
+        
         swin = ensemble.feature_extractors[0]
         vit = ensemble.feature_extractors[1]
         densenet = ensemble.feature_extractors[2]
         resnet = ensemble.feature_extractors[3]
         
-        # --- Define correct target layers for each model ---
-        # For Transformers, we target the normalization layer of the last block.
-        # For CNNs, we target the final convolutional layer or block.
+        # Define target layers
         swin_target_layers = [swin.module.layers[-1].blocks[-1].norm2]
         vit_target_layers = [vit.module.blocks[-1].norm1]
-        densenet_target_layers = [densenet.module.features[-1]] # Or densenet.features[-1] for older timm versions
+        densenet_target_layers = [densenet.module.features[-1]]
         resnet_target_layers = [resnet.module.layer4[-1]]
-
+        
         imagens_brutas = [X[i] for i in test_idxs]
         nomes_imgs = [X_nomes[i] for i in test_idxs]
         images_heat = []
-        cont = 1
+        cont = 0
+
+        s = nn.Sigmoid()
         
         for img in imagens_brutas:
+            # Generate individual heatmaps
+            cam_swin = generate_grayscale_cam(
+                swin, swin_target_layers, img, 
+                reshape_transform=reshape_transform_swin,
+                size=(224, 224)
+            )
             
-            # --- 1. Generate individual heatmaps ---
-            cam_swin = generate_grayscale_cam(swin, swin_target_layers, img, reshape_transform=reshape_transform_swin)
+            # ViT uses 448x448, which gives 14x14 patches (448/32=14)
+            cam_vit = generate_grayscale_cam(
+                vit, vit_target_layers, img, 
+                reshape_transform=lambda t: reshape_transform_vit(t, h=14, w=14),
+                size=(448, 448)
+            )
+            # Resize ViT CAM to match others
+            cam_vit = cv2.resize(cam_vit, (224, 224), interpolation=cv2.INTER_LINEAR)
             
-            cam_vit = generate_grayscale_cam(vit, vit_target_layers, img, reshape_transform=reshape_transform_vit, size=(448,448))
-            cam_vit = cv2.resize(cam_vit, (224,224), interpolation=cv2.INTER_AREA)
+            cam_densenet = generate_grayscale_cam(
+                densenet, densenet_target_layers, img,
+                size=(224, 224)
+            )
             
-            cam_densenet = generate_grayscale_cam(densenet, densenet_target_layers, img)
+            cam_resnet = generate_grayscale_cam(
+                resnet, resnet_target_layers, img,
+                size=(224, 224)
+            )
             
-            cam_resnet = generate_grayscale_cam(resnet, resnet_target_layers, img)
-            
-            # --- 2. Average the heatmaps ---
-            # Now we include all four models in the average calculation.
+            # Average the heatmaps
             all_cams = [cam_swin, cam_vit, cam_densenet, cam_resnet]
             mean_cam = np.mean(all_cams, axis=0)
             
-            # --- 3. Prepare the original image for visualization ---
-            img_size = (224, 224) # Ensure consistent size
-            pil_img = img.copy()
-            rgb_img_float = np.array(pil_img.resize(img_size), dtype=np.float32) / 255.0
+            # Prepare the original image for visualization
+            img_size = (224, 224)
+            tensor_img = F.interpolate(
+                img.unsqueeze(0),
+                size=img_size,
+                mode="bilinear",
+                align_corners=False
+            ).squeeze(0)
             
-            # --- 4. Overlay the averaged heatmap and plot ---
-            mean_cam_image = show_cam_on_image(rgb_img_float, mean_cam, use_rgb=True, image_weight=0.6)
+            # Tensor is already in [0, 1] from ToTensor()
+            tensor_img = tensor_img.float()
+            rgb_img_float = tensor_img.permute(1, 2, 0).cpu().numpy()
+            
+            # Ensure rgb_img_float is in valid range
+            rgb_img_float = np.clip(rgb_img_float, 0, 1)
+            
+            # Overlay the averaged heatmap
+            mean_cam_image = show_cam_on_image(
+                rgb_img_float, 
+                mean_cam, 
+                use_rgb=True, 
+                image_weight=0.6
+            )
 
-            images_heat.append(mean_cam_image)
+            outputs = ensemble(img.unsqueeze(0).to(self.device)) #[1, 1]
+            outputs = outputs.view(-1) #[1]
+            outputs = s(outputs)
+            predicted = torch.where(outputs > 0.5, torch.ones_like(outputs), torch.zeros_like(outputs)).item()
 
+            if(predicted == 1):
+                predicted = "Lymphoma"
+            else:
+                predicted = "SGT"
+            
+            label = "SGT"
+            if("lymph" in nomes_imgs[cont]):
+                label = "Lymphoma"
+
+            print(f"({label}, {predicted})-", end='')
+            
+            
+            # Add text to the image
+            mean_cam_image_with_text = mean_cam_image.copy()
+            
+            # Define text properties
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.4
+            thickness = 0
+            color = (255, 255, 255)  # White text
+            bg_color = (0, 0, 0)  # Black background
+            
+            # Add label
+            label_text = f"Label: {label}"
+            cv2.putText(mean_cam_image_with_text, label_text, (10, 30), 
+                        font, font_scale, bg_color, thickness + 2, cv2.LINE_AA)
+            cv2.putText(mean_cam_image_with_text, label_text, (10, 30), 
+                        font, font_scale, color, thickness, cv2.LINE_AA)
+            
+            # Add prediction
+            pred_text = f"Pred: {predicted}"
+            cv2.putText(mean_cam_image_with_text, pred_text, (10, 60), 
+                        font, font_scale, bg_color, thickness + 2, cv2.LINE_AA)
+            cv2.putText(mean_cam_image_with_text, pred_text, (10, 60), 
+                        font, font_scale, color, thickness, cv2.LINE_AA)
+            
+            # Use this image instead
+            images_heat.append(mean_cam_image_with_text)
             print(cont, end=' ')
             cont += 1
-
-        #Fazendo o zip
+        
+        # Create zip file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
             for i, heatmap_array in enumerate(images_heat):
-                # Convert NumPy array to a PIL Image
                 image = Image.fromarray(heatmap_array)
-                
-                # Create an in-memory buffer for the PNG image
                 image_buffer = io.BytesIO()
                 image.save(image_buffer, format='PNG')
-                
-                # Write the image buffer's content to the zip file
                 file_name = f"heatmap_{nomes_imgs[i]}.png"
                 zip_file.writestr(file_name, image_buffer.getvalue())
         
-        # --- 3. Save the Zip File to Disk ---
-        zip_file_name = f"working/heatmaps/heatmaps_fold_{fold}.zip"
+        # Save the zip file
+        zip_file_name = f"/kaggle/working/heatmaps/heatmaps_fold_{fold}.zip"
         with open(zip_file_name, "wb") as f:
             f.write(zip_buffer.getvalue())
         
-        print(f"'\n{zip_file_name}' created successfully!")
+        print(f"\n'{zip_file_name}' created successfully!")
 
 
 
@@ -427,6 +516,10 @@ class Total_Writer_Ensemble:
         all_labels = []
         
         s = nn.Sigmoid()
+
+        rede.eval()
+        for extractor in rede.feature_extractors:
+            extractor.eval()
         
         with torch.no_grad():
             for inputs, labels in test_loader:
@@ -446,6 +539,12 @@ class Total_Writer_Ensemble:
         #Matriz de confusão
         cm = confusion_matrix(all_labels, all_preds)
         class_names = ["TGS", "Linfoma"] # Seus nomes de classe
+
+        print("\nLabels: ", end='')
+        print(all_labels)
+        print("\nPreds: ", end='')
+        print(all_preds)
+        print()
         
         plt.figure(figsize=(8, 6))
         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
@@ -453,4 +552,4 @@ class Total_Writer_Ensemble:
         plt.title('Ensemble')
         plt.ylabel('Classe Verdadeira')
         plt.xlabel('Classe Predita')
-        plt.savefig(f'working/conf_matriz/matriz_fold_{fold}.tiff', dpi=600)
+        plt.savefig(f'/kaggle/working/conf_matriz/matriz_fold_{fold}.tiff', dpi=600)
